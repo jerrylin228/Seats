@@ -1,0 +1,1084 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Users, 
+  Upload, 
+  Shuffle, 
+  Download, 
+  Copy, 
+  Settings, 
+  RefreshCw,
+  Printer,
+  FileText,
+  AlertTriangle,
+  Info,
+  Grid,
+  Check,
+  Plus,
+  Trash2
+} from 'lucide-react';
+
+// 精確比對圖片 (919 班座位表) 之男女棋盤交錯 6x6 佈局:
+// R0: none, male, female, male, female, male
+// R1: male, female, male, female, male, female
+// R2: female, male, female, male, female, male (反向交錯: 26女, 10男, 27女, 11男, 28女, 12男)
+// R3: male, female, male, female, male, female (6男, 23女, 8男, 24女, 9男, 25女)
+// R4: female, male, female, male, female, male (反向交錯: 20女, 3男, 21女, 4男, 22女, 5男)
+// R5: male, female, male, female, none, none (1男, 18女, 2男, 19女)
+const defaultLayout = [
+  ['none', 'male', 'female', 'male', 'female', 'male'],
+  ['male', 'female', 'male', 'female', 'male', 'female'],
+  ['female', 'male', 'female', 'male', 'female', 'male'],
+  ['male', 'female', 'male', 'female', 'male', 'female'],
+  ['female', 'male', 'female', 'male', 'female', 'male'],
+  ['male', 'female', 'male', 'female', 'none', 'none']
+];
+
+export default function App() {
+  // --- 狀態管理 ---
+  // 預設 20 個班級: 901 ~ 920
+  const [classes, setClasses] = useState(() => {
+    const saved = localStorage.getItem('music_room_classes_v2');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return Array.from({ length: 20 }, (_, i) => ({
+      id: `class-${i + 1}`,
+      name: `9${(i + 1).toString().padStart(2, '0')}`,
+      students: [
+        { seatNo: 1, name: '吳永睿', gender: '男' },
+        { seatNo: 2, name: '李書承', gender: '男' },
+        { seatNo: 3, name: '周維凱', gender: '男' },
+        { seatNo: 4, name: '林丞愷', gender: '男' },
+        { seatNo: 5, name: '洪承暘', gender: '男' },
+        { seatNo: 6, name: '胡力翔', gender: '男' },
+        { seatNo: 7, name: '徐宏碩', gender: '男' },
+        { seatNo: 8, name: '徐秉彤', gender: '男' },
+        { seatNo: 9, name: '張柏晟', gender: '男' },
+        { seatNo: 10, name: '郭奕辰', gender: '男' },
+        { seatNo: 11, name: '陳廷維', gender: '男' },
+        { seatNo: 12, name: '陳品豪', gender: '男' },
+        { seatNo: 13, name: '陳彥希', gender: '男' },
+        { seatNo: 14, name: '劉浩辰', gender: '男' },
+        { seatNo: 15, name: '鄭喬駿', gender: '男' },
+        { seatNo: 16, name: '蕭玎錐', gender: '男' },
+        { seatNo: 17, name: '謝永承', gender: '男' },
+        { seatNo: 18, name: '王唯恩', gender: '女' },
+        { seatNo: 19, name: '李昀珊', gender: '女' },
+        { seatNo: 20, name: '侯詩紜', gender: '女' },
+        { seatNo: 21, name: '姜涵勻', gender: '女' },
+        { seatNo: 22, name: '張卉岑', gender: '女' },
+        { seatNo: 23, name: '莊若雲', gender: '女' },
+        { seatNo: 24, name: '莊婕瑜', gender: '女' },
+        { seatNo: 25, name: '莊瑀芝', gender: '女' },
+        { seatNo: 26, name: '彭子軒', gender: '女' },
+        { seatNo: 27, name: '彭穎暄', gender: '女' },
+        { seatNo: 28, name: '湯育慈', gender: '女' },
+        { seatNo: 29, name: '馮乙琳', gender: '女' },
+        { seatNo: 30, name: '黃品童', gender: '女' },
+        { seatNo: 31, name: '詹雨玹', gender: '女' },
+        { seatNo: 32, name: '戴瑀岑', gender: '女' },
+        { seatNo: 33, name: '闕潔怡', gender: '女' }
+      ]
+    }));
+  });
+
+  const [currentClassId, setCurrentClassId] = useState(() => classes[0]?.id || 'class-1');
+  const [grid, setGrid] = useState(() => {
+    const saved = localStorage.getItem('music_room_grid_layout_v2');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return defaultLayout.map(row => 
+      row.map(type => ({ type, student: null }))
+    );
+  });
+
+  // 模式: 'view' (檢視與分配), 'layout' (編輯座位屬性)
+  const [mode, setMode] = useState('view');
+  
+  // 隨機分配對應： assignments[row-col] = { seatNo, name, gender }
+  const [assignments, setAssignments] = useState(() => {
+    const saved = localStorage.getItem(`music_room_assign_${currentClassId}`);
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {};
+  });
+
+  // Modal 狀態
+  const [validationModal, setValidationModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    details: null,
+    onConfirm: null
+  });
+
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [rawTextImport, setRawTextImport] = useState('');
+  const [toastMessage, setToastMessage] = useState('');
+
+  const seatingAreaRef = useRef(null);
+
+  // 取得目前班級
+  const currentClass = classes.find(c => c.id === currentClassId) || classes[0] || { id: '', name: '', students: [] };
+
+  // 持久化儲存
+  useEffect(() => {
+    localStorage.setItem('music_room_classes_v2', JSON.stringify(classes));
+  }, [classes]);
+
+  useEffect(() => {
+    localStorage.setItem('music_room_grid_layout_v2', JSON.stringify(grid));
+  }, [grid]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(`music_room_assign_${currentClassId}`);
+    if (saved) {
+      try {
+        setAssignments(JSON.parse(saved));
+      } catch (e) {
+        setAssignments({});
+      }
+    } else {
+      setAssignments({});
+    }
+  }, [currentClassId]);
+
+  // Toast 提示
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  // 統計座位屬性
+  const getSeatStats = () => {
+    let maleSeats = 0;
+    let femaleSeats = 0;
+    let emptySeats = 0;
+    let totalChairs = 0;
+
+    grid.forEach(row => {
+      row.forEach(cell => {
+        if (cell.type === 'male') maleSeats++;
+        if (cell.type === 'female') femaleSeats++;
+        if (cell.type === 'empty') emptySeats++;
+        if (cell.type !== 'none') totalChairs++;
+      });
+    });
+
+    return { maleSeats, femaleSeats, emptySeats, totalChairs };
+  };
+
+  // 統計目前班級人數
+  const getStudentStats = () => {
+    if (!currentClass || !currentClass.students) return { males: 0, females: 0, total: 0 };
+    const males = currentClass.students.filter(s => s.gender === '男' || s.gender === 'M').length;
+    const females = currentClass.students.filter(s => s.gender === '女' || s.gender === 'F').length;
+    return { males, females, total: currentClass.students.length };
+  };
+
+  // 新增班級
+  const handleAddClass = () => {
+    const newNum = classes.length + 1;
+    const newClassObj = {
+      id: `class-${Date.now()}`,
+      name: `9${newNum.toString().padStart(2, '0')}`,
+      students: []
+    };
+    setClasses([...classes, newClassObj]);
+    setCurrentClassId(newClassObj.id);
+    showToast(`已新增班級【${newClassObj.name}】`);
+  };
+
+  // 刪除班級
+  const handleDeleteClass = (e, targetId) => {
+    e.stopPropagation();
+    if (classes.length <= 1) {
+      alert('至少需要保留一個班級！');
+      return;
+    }
+    const targetClass = classes.find(c => c.id === targetId);
+    if (window.confirm(`確定要刪除【${targetClass?.name || '此班級'}】嗎？刪除後名單無法復原。`)) {
+      const nextClasses = classes.filter(c => c.id !== targetId);
+      setClasses(nextClasses);
+      if (currentClassId === targetId) {
+        setCurrentClassId(nextClasses[0].id);
+      }
+      localStorage.removeItem(`music_room_assign_${targetId}`);
+      showToast('已成功刪除班級');
+    }
+  };
+
+  // 切換座位屬性
+  const handleCellClickInEdit = (r, c) => {
+    const types = ['male', 'female', 'empty', 'none'];
+    const currentType = grid[r][c].type;
+    const nextType = types[(types.indexOf(currentType) + 1) % types.length];
+
+    const newGrid = grid.map((row, ri) => 
+      row.map((cell, ci) => {
+        if (ri === r && ci === c) {
+          return { ...cell, type: nextType };
+        }
+        return cell;
+      })
+    );
+    setGrid(newGrid);
+  };
+
+  // 隨機分配座位
+  const handleRandomAssign = (force = false) => {
+    const seatStats = getSeatStats();
+    const studentStats = getStudentStats();
+
+    const maleStudents = currentClass.students.filter(s => s.gender === '男' || s.gender === 'M');
+    const femaleStudents = currentClass.students.filter(s => s.gender === '女' || s.gender === 'F');
+
+    const maleMismatch = maleStudents.length !== seatStats.maleSeats;
+    const femaleMismatch = femaleStudents.length !== seatStats.femaleSeats;
+
+    if ((maleMismatch || femaleMismatch) && !force) {
+      setValidationModal({
+        isOpen: true,
+        title: '⚠️ 學生人數與座位數量不符',
+        message: `當前班級【${currentClass.name}】名單人數與座位顏色屬性設定不一致：`,
+        details: {
+          maleSeats: seatStats.maleSeats,
+          maleStudents: maleStudents.length,
+          femaleSeats: seatStats.femaleSeats,
+          femaleStudents: femaleStudents.length,
+        },
+        onConfirm: () => handleRandomAssign(true)
+      });
+      return;
+    }
+
+    // 收集目前學生上一次的座位資訊 (Row, Col)
+    const prevPosMap = {}; // seatNo -> { r, c }
+    Object.entries(assignments).forEach(([key, st]) => {
+      if (st && st.seatNo !== undefined) {
+        const [r, c] = key.split('-').map(Number);
+        prevPosMap[st.seatNo] = { r, c };
+      }
+    });
+
+    // 水塘/回溯洗牌演算法：嘗試匹配男女生至格子，確保不重疊上一次的直排 (Col) 與橫列 (Row)
+    const assignGenderGroup = (studentsGroup, targetType) => {
+      // 收集所有符合目標顏色的格子座標
+      const availableCells = [];
+      grid.forEach((row, r) => {
+        row.forEach((cell, c) => {
+          if (cell.type === targetType) {
+            availableCells.push({ r, c });
+          }
+        });
+      });
+
+      // 隨機打亂學生順序
+      const students = [...studentsGroup].sort(() => Math.random() - 0.5);
+
+      // 最多嘗試 200 次迴避歷史位置的隨機配對
+      for (let attempt = 0; attempt < 200; attempt++) {
+        const shuffledCells = [...availableCells].sort(() => Math.random() - 0.5);
+        let isValid = true;
+        const tempAssign = [];
+
+        for (let i = 0; i < students.length; i++) {
+          if (i >= shuffledCells.length) break;
+          const st = students[i];
+          const cell = shuffledCells[i];
+          const prev = prevPosMap[st.seatNo];
+
+          // 核心規則比對：同一位同學不可被分配到同一個橫列 (r) 或直排 (c)
+          if (prev && (prev.r === cell.r || prev.c === cell.c)) {
+            isValid = false;
+            break;
+          }
+          tempAssign.push({ cell, student: st });
+        }
+
+        if (isValid || attempt === 199) {
+          // 若 200 次嘗試皆無法完全避免（通常在人數極少或限制過嚴時），退回最佳配對結果
+          return tempAssign;
+        }
+      }
+      return [];
+    };
+
+    const maleResults = assignGenderGroup(maleStudents, 'male');
+    const femaleResults = assignGenderGroup(femaleStudents, 'female');
+
+    const newAssignments = {};
+    maleResults.forEach(({ cell, student }) => {
+      newAssignments[`${cell.r}-${cell.c}`] = student;
+    });
+    femaleResults.forEach(({ cell, student }) => {
+      newAssignments[`${cell.r}-${cell.c}`] = student;
+    });
+
+    setAssignments(newAssignments);
+    localStorage.setItem(`music_room_assign_${currentClassId}`, JSON.stringify(newAssignments));
+    showToast(`已完成座位分配！(已套用「防跨相同行列」規則)`);
+  };
+
+  // 清空當前座位
+  const handleClearAssignments = () => {
+    setAssignments({});
+    localStorage.removeItem(`music_room_assign_${currentClassId}`);
+    showToast('已清空當前座位表內容');
+  };
+
+  // 解析學生文字
+  const parseAndImportStudents = (lines) => {
+    const parsedStudents = [];
+    lines.forEach((line, idx) => {
+      const cleanLine = line.trim();
+      if (!cleanLine) return;
+
+      const parts = cleanLine.split(/[\t,; ]+/).filter(Boolean);
+      if (parts.length === 0) return;
+
+      const firstPart = parts[0];
+      if (firstPart.includes('座號') || firstPart.includes('姓名')) return;
+
+      let seatNo = parseInt(parts[0], 10);
+      let name = '';
+      let rawGender = '';
+
+      if (!isNaN(seatNo)) {
+        name = parts[1] || '';
+        rawGender = parts[2] || '';
+      } else {
+        seatNo = idx + 1;
+        name = parts[0] || '';
+        rawGender = parts[1] || '';
+      }
+
+      let gender = '男';
+      if (rawGender.includes('女') || rawGender.toUpperCase() === 'F') {
+        gender = '女';
+      }
+
+      if (name) {
+        parsedStudents.push({ seatNo, name, gender });
+      }
+    });
+
+    if (parsedStudents.length > 0) {
+      updateCurrentClassStudents(parsedStudents);
+      setImportModalOpen(false);
+      setRawTextImport('');
+      showToast(`成功匯入 ${parsedStudents.length} 位學生！`);
+    } else {
+      alert('未讀取到有效的學生資料，請確認格式（座號 姓名 性別）');
+    }
+  };
+
+  // CSV 上傳處理
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const content = evt.target.result;
+        const lines = content.split(/\r\n|\n/);
+        parseAndImportStudents(lines);
+      } catch (err) {
+        alert('檔案讀取失敗，請上傳 CSV 或 TXT 文字檔。');
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const handleTextImport = () => {
+    const lines = rawTextImport.split('\n');
+    parseAndImportStudents(lines);
+  };
+
+  const updateCurrentClassStudents = (newStudents) => {
+    setClasses(prev => prev.map(c => {
+      if (c.id === currentClassId) {
+        return { ...c, students: newStudents };
+      }
+      return c;
+    }));
+  };
+
+  const handleClassNameChange = (newName) => {
+    setClasses(prev => prev.map(c => 
+      c.id === currentClassId ? { ...c, name: newName } : c
+    ));
+  };
+
+  // 下載高清 PNG (修正鋼琴位置與精確座位)
+  const handleExportPNG = () => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const width = 1200;
+    const height = 800;
+    canvas.width = width;
+    canvas.height = height;
+
+    // 背景
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // 標題與講台
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${currentClass.name}`, width / 2, 50);
+
+    // 講台
+    ctx.fillStyle = '#ea580c';
+    ctx.fillRect(width / 2 - 220, 70, 440, 40);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('講 台', width / 2, 98);
+
+    // 鋼琴 (依圖檔置於左上方小區域)
+    ctx.fillStyle = '#2563eb';
+    ctx.fillRect(90, 40, 50, 70);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('鋼', 115, 68);
+    ctx.fillText('琴', 115, 93);
+
+    // 右側前後門
+    ctx.fillStyle = '#65a30d';
+    ctx.fillRect(width - 90, 40, 60, 40);
+    ctx.fillText('前門', width - 60, 67);
+
+    ctx.fillRect(width - 90, 710, 60, 40);
+    ctx.fillText('後門', width - 60, 737);
+
+    // 畫 6x6 網格
+    const startX = 140;
+    const startY = 130;
+    const cellW = 154;
+    const cellH = 90;
+    const gap = 8;
+
+    grid.forEach((row, r) => {
+      row.forEach((cell, c) => {
+        const x = startX + c * (cellW + gap);
+        const y = startY + r * (cellH + gap);
+        const student = assignments[`${r}-${c}`];
+
+        if (cell.type === 'none') return;
+
+        // 色彩
+        if (cell.type === 'male') {
+          ctx.fillStyle = '#e0f2fe';
+          ctx.strokeStyle = '#000000';
+        } else if (cell.type === 'female') {
+          ctx.fillStyle = '#ffe6d5';
+          ctx.strokeStyle = '#000000';
+        } else {
+          ctx.fillStyle = '#e2e8f0';
+          ctx.strokeStyle = '#000000';
+        }
+
+        ctx.lineWidth = 1.5;
+        // 畫整體外框
+        ctx.fillRect(x, y, cellW, cellH);
+        ctx.strokeRect(x, y, cellW, cellH);
+
+        // 畫左右分隔線 (左 42px 座號區, 右 112px 姓名區)
+        const dividerX = x + 42;
+        ctx.beginPath();
+        ctx.moveTo(dividerX, y);
+        ctx.lineTo(dividerX, y + cellH);
+        ctx.stroke();
+
+        // 填入文字
+        if (student) {
+          // 左側座號
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 22px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${student.seatNo}`, x + 21, y + cellH / 2 + 8);
+
+          // 右側姓名
+          ctx.font = 'bold 24px sans-serif';
+          ctx.fillText(student.name, dividerX + 56, y + cellH / 2 + 8);
+        } else if (cell.type === 'empty') {
+          ctx.fillStyle = '#64748b';
+          ctx.font = '16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('灰', x + 21, y + cellH / 2 + 6);
+          ctx.fillText('不坐人', dividerX + 56, y + cellH / 2 + 6);
+        }
+      });
+    });
+
+    // 下載
+    const link = document.createElement('a');
+    link.download = `${currentClass.name}_音樂教室座位表.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    showToast('已成功下載圖片！');
+  };
+
+  // 複製貼回 PPT (修正為左右兩格結構: 左座號 + 右姓名)
+  const handleCopyForPPT = () => {
+    // 每個座位在 PPT HTML 表格中會由 2 個 <td> 組成，一排 6 個座位即為 12 欄 (colspan/td)
+    let htmlStr = `<table border="1" style="border-collapse: collapse; text-align: center; font-family: Microsoft JhengHei, sans-serif; width: 100%; border: 2px solid #000;">`;
+    
+    grid.forEach((row, r) => {
+      htmlStr += `<tr style="height: 50px;">`;
+      row.forEach((cell, c) => {
+        const student = assignments[`${r}-${c}`];
+        let bgColor = '#ffffff';
+        let textColor = '#000000';
+        
+        if (cell.type === 'male') {
+          bgColor = '#E0F2FE'; // 淡藍
+        } else if (cell.type === 'female') {
+          bgColor = '#FFE6D5'; // 淡粉橘
+        } else if (cell.type === 'empty') {
+          bgColor = '#E2E8F0'; // 灰
+        } else if (cell.type === 'none') {
+          bgColor = '#FFFFFF';
+        }
+
+        if (cell.type === 'none') {
+          // 無桌椅位置：放 2 個空白格
+          htmlStr += `<td style="background-color: #ffffff; border: none; width: 3%;"></td>`;
+          htmlStr += `<td style="background-color: #ffffff; border: none; width: 13.6%;"></td>`;
+        } else {
+          // 左欄：座號
+          htmlStr += `<td style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid #000; width: 3.5%; font-size: 16px; font-weight: bold; vertical-align: middle;">`;
+          htmlStr += student ? `${student.seatNo}` : '';
+          htmlStr += `</td>`;
+
+          // 右欄：姓名
+          htmlStr += `<td style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid #000; width: 13.1%; font-size: 18px; font-weight: bold; vertical-align: middle;">`;
+          if (student) {
+            htmlStr += `${student.name}`;
+          } else if (cell.type === 'empty') {
+            htmlStr += `<span style="font-size: 13px; color: #666;">不坐人</span>`;
+          }
+          htmlStr += `</td>`;
+        }
+      });
+      htmlStr += `</tr>`;
+    });
+    htmlStr += `</table>`;
+
+    try {
+      const listener = (e) => {
+        e.clipboardData.setData('text/html', htmlStr);
+        e.clipboardData.setData('text/plain', '座位表已複製');
+        e.preventDefault();
+      };
+      document.addEventListener('copy', listener);
+      document.execCommand('copy');
+      document.removeEventListener('copy', listener);
+      showToast('已複製左右分格表格！可在 PowerPoint 中按 Ctrl+V 貼上');
+    } catch (err) {
+      alert('複製失敗，請重試');
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const seatStats = getSeatStats();
+  const studentStats = getStudentStats();
+
+  return (
+    <div className="min-h-screen bg-slate-100 font-sans text-slate-800 pb-12 print:bg-white print:pb-0">
+      {/* 頂部導覽列 */}
+      <header className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white shadow-md sticky top-0 z-30 print:hidden">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
+              <Grid className="w-6 h-6 text-blue-200" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold leading-tight">國中音樂教室座位編排系統</h1>
+              <p className="text-xs text-blue-200">專為音樂教師設計．支援 PPT 左右分格複製與隨機抽籤</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 bg-blue-900/40 p-1 rounded-xl border border-white/10">
+            <button
+              onClick={() => setMode('view')}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                mode === 'view'
+                  ? 'bg-white text-blue-900 shadow-sm'
+                  : 'text-blue-100 hover:bg-white/10'
+              }`}
+            >
+              座位編排與抽籤
+            </button>
+            <button
+              onClick={() => setMode('layout')}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
+                mode === 'layout'
+                  ? 'bg-amber-400 text-slate-900 shadow-sm font-bold'
+                  : 'text-blue-100 hover:bg-white/10'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              編輯教室佈局
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Toast 訊息 */}
+      {toastMessage && (
+        <div className="fixed top-16 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center space-x-2 border border-slate-700 animate-bounce print:hidden">
+          <Check className="w-4 h-4 text-green-400" />
+          <span className="text-sm font-medium">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* 主要內容 */}
+      <main className="max-w-7xl mx-auto px-4 mt-6 print:m-0 print:p-0 print:max-w-none">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 print:block">
+
+          {/* 左側面板：班級選擇、新增/刪除班級與名單 */}
+          <div className="lg:col-span-1 space-y-5 print:hidden">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                  班級選擇 ({classes.length}個班)
+                </h2>
+                <button
+                  onClick={handleAddClass}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
+                  title="新增班級"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  新增班級
+                </button>
+              </div>
+
+              {/* 班級列表 (可滾動) */}
+              <div className="grid grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1 mb-4">
+                {classes.map((cls) => (
+                  <div
+                    key={cls.id}
+                    onClick={() => setCurrentClassId(cls.id)}
+                    className={`group relative py-2 px-1 rounded-xl text-xs font-bold transition-all text-center cursor-pointer border flex items-center justify-center ${
+                      currentClassId === cls.id
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm scale-105 z-10'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{cls.name}</span>
+                    {/* 刪除班級按鈕 */}
+                    {classes.length > 1 && (
+                      <button
+                        onClick={(e) => handleDeleteClass(e, cls.id)}
+                        className={`absolute -top-1 -right-1 p-0.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600`}
+                        title="刪除班級"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* 編輯當前班級名稱 */}
+              <div className="flex items-center space-x-2 pt-2 border-t border-slate-100">
+                <span className="text-xs text-slate-500 whitespace-nowrap">班級名稱:</span>
+                <input
+                  type="text"
+                  value={currentClass?.name || ''}
+                  onChange={(e) => handleClassNameChange(e.target.value)}
+                  className="w-full text-sm font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* 學生名單 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-blue-600" />
+                  學生名單 ({studentStats.total}人)
+                </h3>
+                <button
+                  onClick={() => setImportModalOpen(true)}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  匯入名單
+                </button>
+              </div>
+
+              {/* 性別比例統計 */}
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="bg-sky-50 border border-sky-100 rounded-xl p-2.5 text-center">
+                  <span className="text-xs text-sky-700 font-medium block">男生名單</span>
+                  <span className="text-lg font-extrabold text-sky-900">{studentStats.males} 人</span>
+                </div>
+                <div className="bg-orange-50 border border-orange-100 rounded-xl p-2.5 text-center">
+                  <span className="text-xs text-orange-700 font-medium block">女生名單</span>
+                  <span className="text-lg font-extrabold text-orange-900">{studentStats.females} 人</span>
+                </div>
+              </div>
+
+              {/* 名單預覽 */}
+              <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-sm">
+                {(!currentClass || !currentClass.students || currentClass.students.length === 0) ? (
+                  <div className="py-8 text-center text-slate-400 text-xs">
+                    尚未匯入學生名單<br/>點擊「匯入名單」可從 Excel 貼上
+                  </div>
+                ) : (
+                  currentClass.students.map((st, i) => (
+                    <div key={i} className="px-3 py-1.5 flex items-center justify-between hover:bg-slate-50">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-5 text-xs text-slate-400 text-right font-mono">{st.seatNo}.</span>
+                        <span className="font-medium text-slate-700">{st.name}</span>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        st.gender === '男' ? 'bg-sky-100 text-sky-800' : 'bg-orange-100 text-orange-800'
+                      }`}>
+                        {st.gender}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 右側主要畫布 */}
+          <div className="lg:col-span-3 space-y-4 print:w-full">
+            
+            {/* 操作按鈕群 (列印隱藏) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
+              <div className="flex items-center space-x-4 text-xs font-medium">
+                <span className="text-slate-500">座位容量:</span>
+                <span className="flex items-center gap-1 text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-200">
+                  <span className="w-2 h-2 rounded-full bg-sky-400 inline-block"></span>
+                  男: {seatStats.maleSeats} (需求:{studentStats.males})
+                </span>
+                <span className="flex items-center gap-1 text-orange-700 bg-orange-50 px-2.5 py-1 rounded-md border border-orange-200">
+                  <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>
+                  女: {seatStats.femaleSeats} (需求:{studentStats.females})
+                </span>
+                <span className="flex items-center gap-1 text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md">
+                  不坐人: {seatStats.emptySeats}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {mode === 'view' ? (
+                  <>
+                    <button
+                      onClick={() => handleRandomAssign(false)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm px-4 py-2 rounded-xl shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                    >
+                      <Shuffle className="w-4 h-4" />
+                      隨機分配座位
+                    </button>
+                    <button
+                      onClick={handleClearAssignments}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold px-3 py-2 rounded-xl transition-all"
+                      title="清空座位"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                    <div className="h-5 w-px bg-slate-200 mx-1"></div>
+                    <button
+                      onClick={handleCopyForPPT}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+                    >
+                      <Copy className="w-4 h-4" />
+                      複製貼回 PPT (左右分格)
+                    </button>
+                    <button
+                      onClick={handleExportPNG}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+                    >
+                      <Download className="w-4 h-4" />
+                      匯出圖檔
+                    </button>
+                    <button
+                      onClick={handlePrint}
+                      className="bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+                    >
+                      <Printer className="w-4 h-4" />
+                      列印 / PDF
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex items-center space-x-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg">
+                    <Info className="w-4 h-4 text-amber-600" />
+                    <span>點擊格子切換：<b>男位 (藍)</b> ➔ <b>女位 (粉橘)</b> ➔ <b>不坐人 (灰)</b> ➔ <b>無桌椅</b></span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 音樂教室圖表看板 (依圖片改為「左座號、右姓名」分格結構) */}
+            <div 
+              className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 relative overflow-hidden print:shadow-none print:border-none print:p-0" 
+              ref={seatingAreaRef}
+            >
+              
+              {/* 頂部標題與周邊元件 (鋼琴、講台、前門) */}
+              <div className="relative mb-6">
+                
+                {/* 鋼琴 (依圖檔改為左上方獨立小區塊) */}
+                <div className="absolute left-2 top-0 w-12 h-16 bg-blue-600 text-white font-bold rounded-lg flex flex-col items-center justify-center text-sm shadow-md border border-blue-700 select-none">
+                  <span>鋼</span>
+                  <span>琴</span>
+                </div>
+
+                {/* 前門 (右上角) */}
+                <div className="absolute right-2 top-0 bg-lime-700 text-white text-xs font-bold px-3 py-2 rounded-lg border border-lime-800">
+                  前門
+                </div>
+
+                {/* 班級與講台 */}
+                <div className="text-center pt-1">
+                  <div className="flex justify-center items-baseline mb-2">
+                    <h2 className="text-3xl font-black text-slate-800 tracking-tight">
+                      {currentClass?.name || '---'}
+                    </h2>
+                  </div>
+
+                  {/* 講台 */}
+                  <div className="mx-auto w-3/5 bg-orange-500 text-white font-bold text-center py-2.5 rounded-xl shadow-sm border border-orange-600 tracking-widest text-lg print:bg-orange-500">
+                    講 台
+                  </div>
+                </div>
+
+              </div>
+
+              {/* 6x6 座位網格 */}
+              <div className="relative">
+                <div className="grid grid-cols-6 gap-2 py-1">
+                  {grid.map((row, r) =>
+                    row.map((cell, c) => {
+                      const student = assignments[`${r}-${c}`];
+
+                      if (cell.type === 'none') {
+                        return <div key={`${r}-${c}`} className="h-16 opacity-0" />;
+                      }
+
+                      // 顏色
+                      let containerBg = "bg-slate-100 border-slate-800";
+                      if (cell.type === 'male') {
+                        containerBg = "bg-[#e0f2fe] border-slate-800 text-slate-900"; // 藍色座位
+                      } else if (cell.type === 'female') {
+                        containerBg = "bg-[#ffe6d5] border-slate-800 text-slate-900"; // 女生顏色粉橘
+                      } else if (cell.type === 'empty') {
+                        containerBg = "bg-slate-200 border-slate-800 text-slate-600"; // 灰色
+                      }
+
+                      return (
+                        <div
+                          key={`${r}-${c}`}
+                          onClick={() => mode === 'layout' && handleCellClickInEdit(r, c)}
+                          className={`h-16 rounded-md border border-slate-800 flex items-stretch overflow-hidden shadow-xs ${containerBg} ${
+                            mode === 'layout' ? 'cursor-pointer hover:ring-2 hover:ring-blue-500' : ''
+                          }`}
+                        >
+                          {/* 左邊：座號格 */}
+                          <div className="w-1/3 border-r border-slate-800 flex items-center justify-center font-bold text-base bg-black/5">
+                            {student ? (
+                              <span>{student.seatNo}</span>
+                            ) : cell.type === 'empty' ? (
+                              <span className="text-xs text-slate-400">-</span>
+                            ) : null}
+                          </div>
+
+                          {/* 右邊：姓名格 */}
+                          <div className="w-2/3 flex items-center justify-center font-bold text-base tracking-wide px-1">
+                            {student ? (
+                              <span className="truncate">{student.name}</span>
+                            ) : cell.type === 'empty' ? (
+                              <span className="text-xs text-slate-500 font-normal">不坐人</span>
+                            ) : (
+                              <span className="text-xs opacity-30">
+                                {cell.type === 'male' ? '男' : '女'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* 後門 (右下角) */}
+                <div className="absolute right-[-54px] bottom-1 bg-lime-700 text-white text-xs font-bold px-3 py-2 rounded-lg border border-lime-800">
+                  後門
+                </div>
+              </div>
+
+              {/* 底部圖例 */}
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-center gap-6 text-xs font-medium text-slate-600">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded border border-slate-800 bg-[#e0f2fe]"></span>
+                  <span>男生座位 (藍)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded border border-slate-800 bg-[#ffe6d5]"></span>
+                  <span>女生座位 (粉橘)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded border border-slate-800 bg-slate-200"></span>
+                  <span>固定不坐人 (灰)</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+      {/* 驗證提示彈窗 */}
+      {validationModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 print:hidden">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-100">
+            <div className="bg-amber-500 text-white p-4 flex items-center space-x-2">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h3 className="font-bold text-lg">{validationModal.title}</h3>
+            </div>
+            <div className="p-5 space-y-4 text-slate-700 text-sm">
+              <p>{validationModal.message}</p>
+              
+              {validationModal.details && (
+                <div className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-200 font-medium">
+                  <div className="flex justify-between items-center text-blue-900">
+                    <span>男生名單 / 藍色座位：</span>
+                    <span className="font-bold">{validationModal.details.maleStudents} 人 / {validationModal.details.maleSeats} 格</span>
+                  </div>
+                  <div className="flex justify-between items-center text-amber-900">
+                    <span>女生名單 / 橘色座位：</span>
+                    <span className="font-bold">{validationModal.details.femaleStudents} 人 / {validationModal.details.femaleSeats} 格</span>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-500">
+                提示：您可以先切換至「<b>編輯教室佈局</b>」模式調整座位顏色標記，或者確認學生名單性別。
+              </p>
+            </div>
+            <div className="bg-slate-50 px-5 py-3.5 flex justify-end space-x-2">
+              <button
+                onClick={() => setValidationModal({ ...validationModal, isOpen: false })}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-all"
+              >
+                取消並修改
+              </button>
+              <button
+                onClick={() => {
+                  setValidationModal({ ...validationModal, isOpen: false });
+                  if (validationModal.onConfirm) validationModal.onConfirm();
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-all"
+              >
+                仍要強制抽籤
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 匯入名單 Modal */}
+      {importModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 print:hidden">
+          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-100">
+            <div className="bg-blue-600 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <FileText className="w-5 h-5" />
+                <h3 className="font-bold text-lg">匯入【{currentClass?.name}】學生名單</h3>
+              </div>
+              <button 
+                onClick={() => setImportModalOpen(false)}
+                className="text-blue-100 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div>
+                <label className="block font-bold text-slate-800 text-sm mb-1">
+                  方法一：上傳 CSV / TXT 檔案
+                </label>
+                <input
+                  type="file"
+                  accept=".csv, .txt"
+                  onChange={handleFileUpload}
+                  className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                />
+              </div>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-4 text-slate-400 text-xs">或從 Excel 複製貼上</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 text-sm mb-1">
+                  方法二：從 Excel 複製貼上文字
+                </label>
+                <textarea
+                  rows={6}
+                  value={rawTextImport}
+                  onChange={(e) => setRawTextImport(e.target.value)}
+                  placeholder={`格式範例 (從 Excel 框選複製即可)：\n1\t吳永睿\t男\n2\t李書承\t男\n3\t王唯恩\t女`}
+                  className="w-full text-xs font-mono p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="bg-slate-50 px-6 py-4 flex justify-end space-x-2">
+              <button
+                onClick={() => setImportModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-all"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleTextImport}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all"
+              >
+                確認匯入文字名單
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 直寫文字與列印 CSS */}
+      <style>{`
+        .writing-mode-vertical {
+          writing-mode: vertical-lr;
+          text-orientation: upright;
+        }
+
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 0.8cm;
+          }
+          body {
+            background-color: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
