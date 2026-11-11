@@ -641,7 +641,19 @@
                       {grid.map((row, r) =>
                         row.map((cell, c) => {
                           const student = assignments[`${r}-${c}`];
-                          if (cell.type === 'none') return <div key={`${r}-${c}`} className="h-16 opacity-0" />;
+                          if (cell.type === 'none') {
+                            return mode === 'layout' ? (
+                              <div
+                                key={`${r}-${c}`}
+                                onClick={() => handleCellClickInEdit(r, c)}
+                                className="h-16 rounded-md border-2 border-dashed border-slate-300 bg-slate-50/50 hover:bg-blue-50/80 hover:border-blue-400 flex items-center justify-center cursor-pointer transition-all"
+                              >
+                                <span className="text-xs text-slate-400 font-medium">+ 無座位</span>
+                              </div>
+                            ) : (
+                              <div key={`${r}-${c}`} className="h-16 opacity-0 pointer-events-none" />
+                            );
+                          }
 
                           let containerBg = cell.type === 'male' ? "bg-[#e0f2fe] border-slate-800 text-slate-900" :
                                             cell.type === 'female' ? "bg-[#ffe6d5] border-slate-800 text-slate-900" :
