@@ -90,15 +90,20 @@
       });
 
       const [currentClassId, setCurrentClassId] = useState(() => classes[0]?.id || 'class-1');
-      const [grid, setGrid] = useState(() => {
-        const saved = localStorage.getItem('music_room_grid_layout_v3');
+      
+      // 各班獨立的座位佈局 (Map: classId -> gridLayout)
+      const [classGrids, setClassGrids] = useState(() => {
+        const saved = localStorage.getItem('music_room_class_grids_v1');
         if (saved) {
           try { return JSON.parse(saved); } catch (e) {}
         }
-        return defaultLayout.map(row => 
-          row.map(type => ({ type, student: null }))
-        );
+        return {};
       });
+
+      // 取得目前選取班級的 grid (若該班尚未設定，則預設使用 defaultLayout)
+      const grid = classGrids[currentClassId] || defaultLayout.map(row => 
+        row.map(type => ({ type, student: null }))
+      );
 
       const [mode, setMode] = useState('view');
       const [assignments, setAssignments] = useState(() => {
@@ -129,8 +134,8 @@
       }, [classes]);
 
       useEffect(() => {
-        localStorage.setItem('music_room_grid_layout_v3', JSON.stringify(grid));
-      }, [grid]);
+        localStorage.setItem('music_room_class_grids_v1', JSON.stringify(classGrids));
+      }, [classGrids]);
 
       useEffect(() => {
         const saved = localStorage.getItem(`music_room_assign_${currentClassId}`);
@@ -192,10 +197,17 @@
             setCurrentClassId(nextClasses[0].id);
           }
           localStorage.removeItem(`music_room_assign_${targetId}`);
+          
+          // 同步清理班級佈局設定
+          const nextGrids = { ...classGrids };
+          delete nextGrids[targetId];
+          setClassGrids(nextGrids);
+
           showToast('已成功刪除班級');
         }
       };
 
+      // 獨立切換當前班級的座位屬性
       const handleCellClickInEdit = (r, c) => {
         const types = ['male', 'female', 'empty', 'none'];
         const currentType = grid[r][c].type;
@@ -204,7 +216,11 @@
         const newGrid = grid.map((row, ri) => 
           row.map((cell, ci) => (ri === r && ci === c) ? { ...cell, type: nextType } : cell)
         );
-        setGrid(newGrid);
+        
+        setClassGrids(prev => ({
+          ...prev,
+          [currentClassId]: newGrid
+        }));
       };
 
       const handleRandomAssign = (force = false) => {
