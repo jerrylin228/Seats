@@ -425,33 +425,27 @@
             ctx.strokeRect(x, y, cellW, cellH);
 
             const dividerX = x + 42;
-            ctx.beginPath();
-            ctx.moveTo(dividerX, y);
-            ctx.lineTo(dividerX, y + cellH);
-            ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(dividerX, y);
+        ctx.lineTo(dividerX, y + cellH);
+        ctx.stroke();
 
-            if (student) {
-              ctx.fillStyle = '#000000';
-              ctx.font = 'bold 22px sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText(`${student.seatNo}`, x + 21, y + cellH / 2 + 8);
+        // 填入文字
+        if (student) {
+          // 左側座號
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 22px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${student.seatNo}`, x + 21, y + cellH / 2 + 8);
 
-              ctx.font = 'bold 24px sans-serif';
-              ctx.fillText(student.name, dividerX + 56, y + cellH / 2 + 8);
-            } else if (cell.type === 'empty') {
-              ctx.fillStyle = '#64748b';
-              ctx.font = '16px sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText('灰', x + 21, y + cellH / 2 + 6);
-              ctx.fillText('不坐人', dividerX + 56, y + cellH / 2 + 6);
-            }
-          });
-        });
+          // 右側姓名
+          ctx.font = 'bold 24px sans-serif';
+          ctx.fillText(student.name, dividerX + 56, y + cellH / 2 + 8);
+        }
+      });
+    });
 
-        const link = document.createElement('a');
-        link.download = `${currentClass.name}_音樂教室座位表.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+    // 下載
         showToast('已成功下載圖片！');
       };
 
@@ -462,13 +456,23 @@
           row.forEach((cell, c) => {
             const student = assignments[`${r}-${c}`];
             let bgColor = cell.type === 'male' ? '#E0F2FE' : cell.type === 'female' ? '#FFE6D5' : cell.type === 'empty' ? '#E2E8F0' : '#FFFFFF';
+            let textColor = '#000000';
 
             if (cell.type === 'none') {
               htmlStr += `<td style="background-color: #ffffff; border: none; width: 3%;"></td>`;
               htmlStr += `<td style="background-color: #ffffff; border: none; width: 13.6%;"></td>`;
             } else {
-              htmlStr += `<td style="background-color: ${bgColor}; color: #000; border: 1px solid #000; width: 3.5%; font-size: 16px; font-weight: bold; vertical-align: middle;">${student ? student.seatNo : ''}</td>`;
-              htmlStr += `<td style="background-color: ${bgColor}; color: #000; border: 1px solid #000; width: 13.1%; font-size: 18px; font-weight: bold; vertical-align: middle;">${student ? student.name : cell.type === 'empty' ? '<span style="font-size:13px;color:#666;">不坐人</span>' : ''}</td>`;
+              // 左欄：座號
+              htmlStr += `<td style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid #000; width: 3.5%; font-size: 16px; font-weight: bold; vertical-align: middle;">`;
+              htmlStr += student ? `${student.seatNo}` : '';
+              htmlStr += `</td>`;
+
+              // 右欄：姓名
+              htmlStr += `<td style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid #000; width: 13.1%; font-size: 18px; font-weight: bold; vertical-align: middle;">`;
+              if (student) {
+                htmlStr += `${student.name}`;
+              }
+              htmlStr += `</td>`;
             }
           });
           htmlStr += `</tr>`;
@@ -662,10 +666,10 @@
                           return (
                             <div key={`${r}-${c}`} onClick={() => mode === 'layout' && handleCellClickInEdit(r, c)} className={`h-16 rounded-md border border-slate-800 flex items-stretch overflow-hidden ${containerBg} ${mode === 'layout' ? 'cursor-pointer hover:ring-2 hover:ring-blue-500' : ''}`}>
                               <div className="w-1/3 border-r border-slate-800 flex items-center justify-center font-bold text-base bg-black/5">
-                                {student ? student.seatNo : cell.type === 'empty' ? <span className="text-xs text-slate-400">-</span> : null}
+                                {student ? student.seatNo : null}
                               </div>
                               <div className="w-2/3 flex items-center justify-center font-bold text-base tracking-wide px-1">
-                                {student ? <span className="truncate">{student.name}</span> : cell.type === 'empty' ? <span className="text-xs text-slate-500 font-normal">不坐人</span> : <span className="text-xs opacity-30">{cell.type === 'male' ? '男' : '女'}</span>}
+                                {student ? <span className="truncate">{student.name}</span> : cell.type === 'empty' ? null : <span className="text-xs opacity-30">{cell.type === 'male' ? '男' : '女'}</span>}
                               </div>
                             </div>
                           );
@@ -685,8 +689,9 @@
             </div>
           </main>
 
+          {/* 驗證提示彈窗 */}
           {validationModal.isOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 print:hidden">
               <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-100">
                 <div className="bg-amber-500 text-white p-4 flex items-center space-x-2">
                   <IconAlert />
@@ -694,41 +699,58 @@
                 </div>
                 <div className="p-5 space-y-4 text-slate-700 text-sm">
                   <p>{validationModal.message}</p>
+                  
                   {validationModal.details && (
                     <div className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-200 font-medium">
-                      <div className="flex justify-between items-center text-blue-900"><span>男生名單 / 藍色座位：</span><span className="font-bold">{validationModal.details.maleStudents} 人 / {validationModal.details.maleSeats} 格</span></div>
-                      <div className="flex justify-between items-center text-amber-900"><span>女生名單 / 橘色座位：</span><span className="font-bold">{validationModal.details.femaleStudents} 人 / {validationModal.details.femaleSeats} 格</span></div>
+                      <div className="flex justify-between items-center text-blue-900">
+                        <span>男生名單 / 藍色座位：</span>
+                        <span className="font-bold">{validationModal.details.maleStudents} 人 / {validationModal.details.maleSeats} 格</span>
+                      </div>
+                      <div className="flex justify-between items-center text-amber-900">
+                        <span>女生名單 / 橘色座位：</span>
+                        <span className="font-bold">{validationModal.details.femaleStudents} 人 / {validationModal.details.femaleSeats} 格</span>
+                      </div>
                     </div>
                   )}
+
+                  <p className="text-xs text-slate-500">
+                    提示：您可以先切換至「<b>編輯教室佈局</b>」模式調整座位顏色標記，或者確認學生名單性別。
+                  </p>
                 </div>
                 <div className="bg-slate-50 px-5 py-3.5 flex justify-end space-x-2">
-                  <button onClick={() => setValidationModal({ ...validationModal, isOpen: false })} className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200">取消</button>
-                  <button onClick={() => { setValidationModal({ ...validationModal, isOpen: false }); if (validationModal.onConfirm) validationModal.onConfirm(); }} className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white">仍要抽籤</button>
+                  <button onClick={() => setValidationModal({ ...validationModal, isOpen: false })} className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200">取消並修改</button>
+                  <button onClick={() => { setValidationModal({ ...validationModal, isOpen: false }); if (validationModal.onConfirm) validationModal.onConfirm(); }} className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm">仍要強制抽籤</button>
                 </div>
               </div>
             </div>
           )}
 
+          {/* 匯入名單 Modal */}
           {importModalOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden">
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 print:hidden">
+              <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-100">
                 <div className="bg-blue-600 text-white p-4 flex items-center justify-between">
                   <div className="flex items-center space-x-2"><h3 className="font-bold text-lg">匯入【{currentClass?.name}】學生名單</h3></div>
-                  <button onClick={() => setImportModalOpen(false)} className="text-blue-100 font-bold">✕</button>
+                  <button onClick={() => setImportModalOpen(false)} className="text-blue-100 hover:text-white font-bold">✕</button>
                 </div>
                 <div className="p-6 space-y-6">
                   <div>
                     <label className="block font-bold text-slate-800 text-sm mb-1">方法一：上傳 CSV / TXT 檔案</label>
-                    <input type="file" accept=".csv, .txt" onChange={handleFileUpload} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                    <input type="file" accept=".csv, .txt" onChange={handleFileUpload} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
+                  </div>
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-slate-200"></div>
+                    <span className="flex-shrink mx-4 text-slate-400 text-xs">或從 Excel 複製貼上</span>
+                    <div className="flex-grow border-t border-slate-200"></div>
                   </div>
                   <div>
                     <label className="block font-bold text-slate-800 text-sm mb-1">方法二：從 Excel 複製貼上文字</label>
-                    <textarea rows={6} value={rawTextImport} onChange={(e) => setRawTextImport(e.target.value)} placeholder={`格式範例：\n1\t吳永睿\t男\n2\t李書承\t男\n3\t王唯恩\t女`} className="w-full text-xs font-mono p-3 border border-slate-300 rounded-xl focus:outline-none" />
+                    <textarea rows={6} value={rawTextImport} onChange={(e) => setRawTextImport(e.target.value)} placeholder={`格式範例 (從 Excel 框選複製即可)：\n1\t吳永睿\t男\n2\t李書承\t男\n3\t王唯恩\t女`} className="w-full text-xs font-mono p-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
                 <div className="bg-slate-50 px-6 py-4 flex justify-end space-x-2">
                   <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200">取消</button>
-                  <button onClick={handleTextImport} className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white">確認匯入</button>
+                  <button onClick={handleTextImport} className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm">確認匯入文字名單</button>
                 </div>
               </div>
             </div>
